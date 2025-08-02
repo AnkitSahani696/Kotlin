@@ -1,0 +1,13 @@
+package com.example.inspiretool.com.example.inspiretool
+
+
+import java.util.Date
+
+data class ScanResult(
+    val id: String = "",
+    val imagePath: String,
+    val extractedText: String,
+    val scanType: String,
+    val timestamp: Date = Date(),
+    val confidence: Float = 0.0f
+)
