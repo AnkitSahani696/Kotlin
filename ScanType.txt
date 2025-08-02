@@ -1,0 +1,7 @@
+package com.example.inspiretool.com.example.inspiretool
+enum class ScanType(val displayName: String) {
+    DOCUMENT("Document"),
+    RECEIPT("Receipt"),
+    BUSINESS_CARD("Business Card"),
+    HANDWRITTEN("Handwritten Note")
+}

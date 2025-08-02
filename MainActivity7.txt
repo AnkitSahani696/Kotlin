@@ -1,0 +1,694 @@
+package com.example.inspiretool
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Matrix
+import android.graphics.RectF
+import android.net.Uri
+import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.MotionEvent
+import android.view.View
+import android.widget.ImageView
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import com.example.inspiretool.databinding.ActivityMain7Binding
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import kotlin.math.max
+import kotlin.math.min
+import androidx.core.graphics.scale
+
+class MainActivity7 : AppCompatActivity() {
+
+    private lateinit var binding: ActivityMain7Binding
+    private var originalBitmap: Bitmap? = null
+    private var resizedBitmap: Bitmap? = null
+    private var croppedBitmap: Bitmap? = null
+    private var currentDisplayBitmap: Bitmap? = null
+
+    // Crop rectangle in image coordinates (not view coordinates)
+    private var cropRect = RectF()
+    private var isDragging = false
+    private var isResizing = false
+    private var dragStartX = 0f
+    private var dragStartY = 0f
+    private var resizeCorner = ResizeCorner.NONE
+    private var isCropMode = false
+
+    private enum class ResizeCorner {
+        NONE, TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT
+    }
+
+    // Enhanced ML Kit sizes
+    private val mlKitSizes = mapOf(
+        "Custom Size" to Pair(0, 0),
+        "Custom File Size" to Pair(-1, -1),
+        "224x224 (MobileNet)" to Pair(224, 224),
+        "299x299 (Inception)" to Pair(299, 299),
+        "416x416 (YOLO)" to Pair(416, 416),
+        "512x512 (High Res)" to Pair(512, 512),
+        "640x640 (Object Detection)" to Pair(640, 640),
+        "1024x1024 (Large Model)" to Pair(1024, 1024),
+        "128x128 (Tiny Model)" to Pair(128, 128),
+        "256x256 (Small Model)" to Pair(256, 256),
+        "384x384 (Medium Model)" to Pair(384, 384),
+        "768x768 (Large Model)" to Pair(768, 768),
+        "1280x720 (HD)" to Pair(1280, 720),
+        "1920x1080 (Full HD)" to Pair(1920, 1080),
+        "320x240 (QVGA)" to Pair(320, 240),
+        "640x480 (VGA)" to Pair(640, 480),
+        "800x600 (SVGA)" to Pair(800, 600)
+    )
+
+    private val imagePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            result.data?.data?.let { uri ->
+                loadImageFromUri(uri)
+            }
+        }
+    }
+
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            openImagePicker()
+        } else {
+            Toast.makeText(this, "Permission denied", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityMain7Binding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        findViewById<ImageView>(R.id.backButton).setOnClickListener {
+            finish() // goes back to previous Activity
+        }
+
+        setupViews()
+        setupSizeSpinner()
+        setupCustomSizeInputs()
+        setupCropImageView()
+        setupFileSizeInputs()
+    }
+
+    private fun setupViews() {
+        binding.btnSelectImage.setOnClickListener {
+            checkPermissionAndOpenPicker()
+        }
+
+        binding.btnResize.setOnClickListener {
+            resizeImage()
+        }
+
+        binding.btnSave.setOnClickListener {
+            saveCurrentImage()
+        }
+
+        binding.btnCrop.setOnClickListener {
+            if (isCropMode) {
+                applyCrop()
+            } else {
+                enterCropMode()
+            }
+        }
+
+        binding.btnResetCrop.setOnClickListener {
+            resetCrop()
+        }
+
+        binding.switchMaintainAspectRatio.setOnCheckedChangeListener { _, _ ->
+            if (currentDisplayBitmap != null) {
+                resizeImage()
+            }
+        }
+    }
+
+    private fun setupSizeSpinner() {
+        val adapter = android.widget.ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_item,
+            mlKitSizes.keys.toList()
+        )
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        binding.spinnerSize.adapter = adapter
+
+        binding.spinnerSize.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val selectedSize = binding.spinnerSize.selectedItem.toString()
+                val isCustomSize = selectedSize == "Custom Size"
+                val isCustomFileSize = selectedSize == "Custom File Size"
+
+                binding.layoutCustomSize.visibility = if (isCustomSize) View.VISIBLE else View.GONE
+                binding.layoutCustomFileSize.visibility = if (isCustomFileSize) View.VISIBLE else View.GONE
+
+                if (!isCustomSize && !isCustomFileSize && currentDisplayBitmap != null) {
+                    resizeImage()
+                }
+            }
+
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+    }
+
+    private fun setupCustomSizeInputs() {
+        val textWatcher = object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                if (binding.spinnerSize.selectedItem.toString() == "Custom Size" && currentDisplayBitmap != null) {
+                    resizeImage()
+                }
+            }
+        }
+
+        binding.etCustomWidth.addTextChangedListener(textWatcher)
+        binding.etCustomHeight.addTextChangedListener(textWatcher)
+    }
+
+    private fun setupFileSizeInputs() {
+        val fileSizeWatcher = object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                if (binding.spinnerSize.selectedItem.toString() == "Custom File Size" && currentDisplayBitmap != null) {
+                    resizeImage()
+                }
+            }
+        }
+
+        binding.etTargetFileSize.addTextChangedListener(fileSizeWatcher)
+
+        val units = arrayOf("KB", "MB")
+        val unitAdapter = android.widget.ArrayAdapter(this, android.R.layout.simple_spinner_item, units)
+        unitAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        binding.spinnerFileSizeUnit.adapter = unitAdapter
+
+        binding.spinnerFileSizeUnit.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (binding.spinnerSize.selectedItem.toString() == "Custom File Size" && currentDisplayBitmap != null) {
+                    resizeImage()
+                }
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupCropImageView() {
+        binding.ivOriginal.setOnTouchListener { view, event ->
+            if (!isCropMode) return@setOnTouchListener false
+
+            val imageView = binding.ivOriginal
+            val bitmap = currentDisplayBitmap ?: return@setOnTouchListener false
+
+            // Get image bounds within ImageView
+            val imageBounds = getImageBoundsInView(imageView, bitmap)
+            val x = event.x
+            val y = event.y
+
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    // Convert view coordinates to crop rect coordinates
+                    val cropRectInView = convertCropRectToView(imageBounds, bitmap)
+
+                    resizeCorner = getResizeCorner(x, y, cropRectInView)
+
+                    if (resizeCorner != ResizeCorner.NONE) {
+                        isResizing = true
+                    } else if (cropRectInView.contains(x, y)) {
+                        isDragging = true
+                        dragStartX = x - cropRectInView.left
+                        dragStartY = y - cropRectInView.top
+                    }
+                }
+
+                MotionEvent.ACTION_MOVE -> {
+                    if (isResizing || isDragging) {
+                        val imageBounds = getImageBoundsInView(imageView, bitmap)
+                        updateCropRect(x, y, imageBounds, bitmap)
+                        imageView.invalidate()
+                    }
+                }
+
+                MotionEvent.ACTION_UP -> {
+                    isDragging = false
+                    isResizing = false
+                    resizeCorner = ResizeCorner.NONE
+                }
+            }
+            true
+        }
+    }
+
+    private fun getImageBoundsInView(imageView: android.widget.ImageView, bitmap: Bitmap): RectF {
+        val viewWidth = imageView.width.toFloat()
+        val viewHeight = imageView.height.toFloat()
+        val imageWidth = bitmap.width.toFloat()
+        val imageHeight = bitmap.height.toFloat()
+
+        val scale = min(viewWidth / imageWidth, viewHeight / imageHeight)
+        val scaledWidth = imageWidth * scale
+        val scaledHeight = imageHeight * scale
+
+        val left = (viewWidth - scaledWidth) / 2
+        val top = (viewHeight - scaledHeight) / 2
+
+        return RectF(left, top, left + scaledWidth, top + scaledHeight)
+    }
+
+    private fun convertCropRectToView(imageBounds: RectF, bitmap: Bitmap): RectF {
+        val scaleX = imageBounds.width() / bitmap.width
+        val scaleY = imageBounds.height() / bitmap.height
+
+        return RectF(
+            imageBounds.left + cropRect.left * scaleX,
+            imageBounds.top + cropRect.top * scaleY,
+            imageBounds.left + cropRect.right * scaleX,
+            imageBounds.top + cropRect.bottom * scaleY
+        )
+    }
+
+    private fun convertViewToCropRect(x: Float, y: Float, imageBounds: RectF, bitmap: Bitmap): RectF {
+        val scaleX = bitmap.width / imageBounds.width()
+        val scaleY = bitmap.height / imageBounds.height()
+
+        val imageX = (x - imageBounds.left) * scaleX
+        val imageY = (y - imageBounds.top) * scaleY
+
+        return RectF(imageX, imageY, imageX, imageY)
+    }
+
+    private fun updateCropRect(x: Float, y: Float, imageBounds: RectF, bitmap: Bitmap) {
+        val scaleX = bitmap.width / imageBounds.width()
+        val scaleY = bitmap.height / imageBounds.height()
+
+        if (isResizing) {
+            val imageX = (x - imageBounds.left) * scaleX
+            val imageY = (y - imageBounds.top) * scaleY
+
+            when (resizeCorner) {
+                ResizeCorner.TOP_LEFT -> {
+                    cropRect.left = max(0f, min(imageX, cropRect.right - 50))
+                    cropRect.top = max(0f, min(imageY, cropRect.bottom - 50))
+                }
+                ResizeCorner.TOP_RIGHT -> {
+                    cropRect.right = min(bitmap.width.toFloat(), max(imageX, cropRect.left + 50))
+                    cropRect.top = max(0f, min(imageY, cropRect.bottom - 50))
+                }
+                ResizeCorner.BOTTOM_LEFT -> {
+                    cropRect.left = max(0f, min(imageX, cropRect.right - 50))
+                    cropRect.bottom = min(bitmap.height.toFloat(), max(imageY, cropRect.top + 50))
+                }
+                ResizeCorner.BOTTOM_RIGHT -> {
+                    cropRect.right = min(bitmap.width.toFloat(), max(imageX, cropRect.left + 50))
+                    cropRect.bottom = min(bitmap.height.toFloat(), max(imageY, cropRect.top + 50))
+                }
+                else -> {}
+            }
+        } else if (isDragging) {
+            val newLeft = (x - dragStartX - imageBounds.left) * scaleX
+            val newTop = (y - dragStartY - imageBounds.top) * scaleY
+            val width = cropRect.width()
+            val height = cropRect.height()
+
+            val maxLeft = bitmap.width - width
+            val maxTop = bitmap.height - height
+
+            cropRect.left = max(0f, min(newLeft, maxLeft))
+            cropRect.top = max(0f, min(newTop, maxTop))
+            cropRect.right = cropRect.left + width
+            cropRect.bottom = cropRect.top + height
+        }
+
+        // Update the custom image view
+        binding.ivOriginal.cropRect = convertCropRectToView(imageBounds, bitmap)
+    }
+
+    private fun getResizeCorner(x: Float, y: Float, cropRectInView: RectF): ResizeCorner {
+        val threshold = 40f
+
+        return when {
+            x <= cropRectInView.left + threshold && y <= cropRectInView.top + threshold -> ResizeCorner.TOP_LEFT
+            x >= cropRectInView.right - threshold && y <= cropRectInView.top + threshold -> ResizeCorner.TOP_RIGHT
+            x <= cropRectInView.left + threshold && y >= cropRectInView.bottom - threshold -> ResizeCorner.BOTTOM_LEFT
+            x >= cropRectInView.right - threshold && y >= cropRectInView.bottom - threshold -> ResizeCorner.BOTTOM_RIGHT
+            else -> ResizeCorner.NONE
+        }
+    }
+
+    private fun checkPermissionAndOpenPicker() {
+        when {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            ) == PackageManager.PERMISSION_GRANTED -> {
+                openImagePicker()
+            }
+            else -> {
+                requestPermissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
+        }
+    }
+
+    private fun openImagePicker() {
+        val intent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
+        imagePickerLauncher.launch(intent)
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun loadImageFromUri(uri: Uri) {
+        try {
+            val inputStream = contentResolver.openInputStream(uri)
+            originalBitmap = BitmapFactory.decodeStream(inputStream)
+            inputStream?.close()
+
+            originalBitmap?.let { bitmap ->
+                currentDisplayBitmap = bitmap
+                binding.ivOriginal.setImageBitmap(bitmap)
+                val originalSizeKB = getImageFileSizeKB(bitmap)
+                binding.tvOriginalSize.text = "Original: ${bitmap.width}x${bitmap.height} (${originalSizeKB} KB)"
+                binding.btnResize.isEnabled = true
+                binding.btnCrop.isEnabled = true
+                binding.btnResetCrop.isEnabled = true
+
+                // Initialize crop rectangle to center 80% of image
+                initializeCropRect(bitmap)
+
+                // Auto-resize on load
+                resizeImage()
+            }
+        } catch (e: IOException) {
+            Toast.makeText(this, "Error loading image: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun initializeCropRect(bitmap: Bitmap) {
+        val margin = min(bitmap.width, bitmap.height) * 0.1f
+        cropRect.set(
+            margin,
+            margin,
+            bitmap.width - margin,
+            bitmap.height - margin
+        )
+    }
+
+    private fun enterCropMode() {
+        isCropMode = true
+        binding.btnCrop.text = "Apply Crop"
+        binding.ivOriginal.showCropOverlay = true
+
+        currentDisplayBitmap?.let { bitmap ->
+            val imageBounds = getImageBoundsInView(binding.ivOriginal, bitmap)
+            binding.ivOriginal.cropRect = convertCropRectToView(imageBounds, bitmap)
+        }
+
+        binding.ivOriginal.invalidate()
+        Toast.makeText(this, "Crop mode enabled. Drag to move, corners to resize", Toast.LENGTH_SHORT).show()
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun applyCrop() {
+        currentDisplayBitmap?.let { bitmap ->
+            // Ensure crop bounds are valid
+            val left = max(0, cropRect.left.toInt())
+            val top = max(0, cropRect.top.toInt())
+            val right = min(bitmap.width, cropRect.right.toInt())
+            val bottom = min(bitmap.height, cropRect.bottom.toInt())
+
+            val width = right - left
+            val height = bottom - top
+
+            if (width > 0 && height > 0) {
+                try {
+                    croppedBitmap = Bitmap.createBitmap(bitmap, left, top, width, height)
+                    currentDisplayBitmap = croppedBitmap
+
+                    // Exit crop mode
+                    isCropMode = false
+                    binding.btnCrop.text = "Crop Image"
+                    binding.ivOriginal.showCropOverlay = false
+
+                    binding.ivOriginal.setImageBitmap(croppedBitmap)
+                    val croppedSizeKB = getImageFileSizeKB(croppedBitmap!!)
+                    binding.tvOriginalSize.text = "Cropped: ${croppedBitmap!!.width}x${croppedBitmap!!.height} (${croppedSizeKB} KB)"
+
+                    // Initialize new crop rectangle for cropped image
+                    initializeCropRect(croppedBitmap!!)
+
+                    // Auto-resize the cropped image
+                    resizeImage()
+
+                    Toast.makeText(this, "Image cropped successfully", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Error cropping image: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                Toast.makeText(this, "Invalid crop area", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun resetCrop() {
+        originalBitmap?.let { bitmap ->
+            currentDisplayBitmap = bitmap
+            croppedBitmap = null
+            isCropMode = false
+            binding.btnCrop.text = "Crop Image"
+            binding.ivOriginal.showCropOverlay = false
+
+            binding.ivOriginal.setImageBitmap(bitmap)
+            val originalSizeKB = getImageFileSizeKB(bitmap)
+            binding.tvOriginalSize.text = "Original: ${bitmap.width}x${bitmap.height} (${originalSizeKB} KB)"
+
+            // Reset crop rectangle
+            initializeCropRect(bitmap)
+
+            // Auto-resize
+            resizeImage()
+
+            Toast.makeText(this, "Crop reset", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun resizeImage() {
+        currentDisplayBitmap?.let { bitmap ->
+            val selectedSize = binding.spinnerSize.selectedItem.toString()
+
+            when (selectedSize) {
+                "Custom Size" -> {
+                    val width = binding.etCustomWidth.text.toString().toIntOrNull() ?: 0
+                    val height = binding.etCustomHeight.text.toString().toIntOrNull() ?: 0
+
+                    if (width <= 0 || height <= 0) {
+                        Toast.makeText(this, "Please enter valid width and height", Toast.LENGTH_SHORT).show()
+                        return
+                    }
+
+                    val targetSize = Pair(width, height)
+                    resizedBitmap = if (binding.switchMaintainAspectRatio.isChecked) {
+                        resizeWithAspectRatio(bitmap, targetSize.first, targetSize.second)
+                    } else {
+                        resizeExact(bitmap, targetSize.first, targetSize.second)
+                    }
+                }
+
+                "Custom File Size" -> {
+                    val targetSizeText = binding.etTargetFileSize.text.toString()
+                    val targetSize = targetSizeText.toDoubleOrNull()
+
+                    if (targetSize == null || targetSize <= 0) {
+                        Toast.makeText(this, "Please enter valid file size", Toast.LENGTH_SHORT).show()
+                        return
+                    }
+
+                    val unit = binding.spinnerFileSizeUnit.selectedItem.toString()
+                    val targetSizeKB = if (unit == "MB") (targetSize * 1024).toInt() else targetSize.toInt()
+
+                    resizedBitmap = resizeToFileSize(bitmap, targetSizeKB)
+                }
+
+                else -> {
+                    val targetSize = mlKitSizes[selectedSize] ?: return
+                    resizedBitmap = if (binding.switchMaintainAspectRatio.isChecked) {
+                        resizeWithAspectRatio(bitmap, targetSize.first, targetSize.second)
+                    } else {
+                        resizeExact(bitmap, targetSize.first, targetSize.second)
+                    }
+                }
+            }
+
+            resizedBitmap?.let { resized ->
+                binding.ivResized.setImageBitmap(resized)
+                val resizedSizeKB = getImageFileSizeKB(resized)
+                binding.tvResizedSize.text = "Resized: ${resized.width}x${resized.height} (${resizedSizeKB} KB)"
+                binding.btnSave.isEnabled = true
+
+                // Calculate compression ratio
+                val originalSize = bitmap.byteCount
+                val resizedSize = resized.byteCount
+                val ratio = (resizedSize.toFloat() / originalSize * 100).toInt()
+                binding.tvCompressionRatio.text = "Size: $ratio% of original"
+            }
+        }
+    }
+
+    private fun resizeToFileSize(bitmap: Bitmap, targetSizeKB: Int): Bitmap {
+        var quality = 90
+        var result = bitmap
+
+        var currentSizeKB = getImageFileSizeKB(result, quality)
+
+        while (currentSizeKB > targetSizeKB && quality > 10) {
+            quality -= 10
+            currentSizeKB = getImageFileSizeKB(result, quality)
+        }
+
+        if (currentSizeKB > targetSizeKB) {
+            var scale = 0.9f
+            while (currentSizeKB > targetSizeKB && scale > 0.1f) {
+                val newWidth = (bitmap.width * scale).toInt()
+                val newHeight = (bitmap.height * scale).toInt()
+                result = bitmap.scale(newWidth, newHeight)
+                currentSizeKB = getImageFileSizeKB(result, quality)
+                scale -= 0.1f
+            }
+        }
+
+        return result
+    }
+
+    private fun getImageFileSizeKB(bitmap: Bitmap, quality: Int = 90): Int {
+        val stream = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, quality, stream)
+        return stream.size() / 1024
+    }
+
+    private fun resizeWithAspectRatio(bitmap: Bitmap, targetWidth: Int, targetHeight: Int): Bitmap {
+        val originalWidth = bitmap.width
+        val originalHeight = bitmap.height
+
+        val scale = min(
+            targetWidth.toFloat() / originalWidth,
+            targetHeight.toFloat() / originalHeight
+        )
+
+        val scaledWidth = (originalWidth * scale).toInt()
+        val scaledHeight = (originalHeight * scale).toInt()
+
+        val scaledBitmap = bitmap.scale(scaledWidth, scaledHeight)
+        val result = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(result)
+
+        canvas.drawColor(Color.BLACK)
+
+        val left = (targetWidth - scaledWidth) / 2
+        val top = (targetHeight - scaledHeight) / 2
+        canvas.drawBitmap(scaledBitmap, left.toFloat(), top.toFloat(), null)
+
+        return result
+    }
+
+    private fun resizeExact(bitmap: Bitmap, targetWidth: Int, targetHeight: Int): Bitmap {
+        return Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
+    }
+
+    private fun saveCurrentImage() {
+        // Save the resized image if available, otherwise save the current display bitmap
+        val bitmapToSave = resizedBitmap ?: currentDisplayBitmap
+
+        bitmapToSave?.let { bitmap ->
+            try {
+                val timestamp = System.currentTimeMillis()
+                val prefix = when {
+                    resizedBitmap != null -> "resized"
+                    croppedBitmap != null -> "cropped"
+                    else -> "processed"
+                }
+                val filename = "${prefix}_${timestamp}.jpg"
+
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val file = File(downloadsDir, filename)
+
+                if (!downloadsDir.exists()) {
+                    downloadsDir.mkdirs()
+                }
+
+                val outputStream = FileOutputStream(file)
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
+                outputStream.flush()
+                outputStream.close()
+
+                Toast.makeText(this, "Image saved to Downloads: $filename", Toast.LENGTH_LONG).show()
+                addToGallery(file)
+
+            } catch (e: IOException) {
+                Toast.makeText(this, "Error saving image: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        } ?: run {
+            Toast.makeText(this, "No image to save", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun addToGallery(file: File) {
+        val intent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
+        intent.data = Uri.fromFile(file)
+        sendBroadcast(intent)
+    }
+
+    fun getBitmapAsByteArray(bitmap: Bitmap, format: Bitmap.CompressFormat = Bitmap.CompressFormat.JPEG, quality: Int = 100): ByteArray {
+        val stream = ByteArrayOutputStream()
+        bitmap.compress(format, quality, stream)
+        return stream.toByteArray()
+    }
+
+    fun normalizeBitmap(bitmap: Bitmap): Array<Array<Array<Float>>> {
+        val width = bitmap.width
+        val height = bitmap.height
+        val normalizedImage = Array(height) { Array(width) { Array(3) { 0f } } }
+
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                val pixel = bitmap.getPixel(x, y)
+                normalizedImage[y][x][0] = (pixel shr 16 and 0xFF) / 255.0f
+                normalizedImage[y][x][1] = (pixel shr 8 and 0xFF) / 255.0f
+                normalizedImage[y][x][2] = (pixel and 0xFF) / 255.0f
+            }
+        }
+
+        return normalizedImage
+    }
+
+    fun getImageStats(bitmap: Bitmap): Map<String, Any> {
+        val stats = mutableMapOf<String, Any>()
+
+        stats["width"] = bitmap.width
+        stats["height"] = bitmap.height
+        stats["pixels"] = bitmap.width * bitmap.height
+        stats["bytes"] = bitmap.byteCount
+        stats["config"] = bitmap.config.toString()
+        stats["hasAlpha"] = bitmap.hasAlpha()
+        stats["aspectRatio"] = bitmap.width.toFloat() / bitmap.height
+
+        return stats
+    }
+}

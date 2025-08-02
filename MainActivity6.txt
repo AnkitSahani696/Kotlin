@@ -1,0 +1,199 @@
+package com.example.inspiretool
+
+import android.annotation.SuppressLint
+import android.content.Intent
+import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.View
+import android.widget.EditText
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.PopupMenu
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.cardview.widget.CardView
+
+
+class MainActivity6 : AppCompatActivity() {
+
+    private lateinit var searchEditText: EditText
+    private lateinit var clearSearchButton: ImageView
+    private lateinit var toolsContainer: LinearLayout
+    private lateinit var logoutButton: CardView
+
+    // Tool cards
+    private lateinit var translatorCard: CardView
+    private lateinit var imageResizeCard: CardView
+    private lateinit var mathsSolution: CardView
+    private lateinit var scannerText: CardView
+
+    // Tool data for search
+    private data class ToolItem(
+        val card: CardView,
+        val title: String,
+        val description: String,
+        val keywords: List<String>
+    )
+
+    private lateinit var toolItems: List<ToolItem>
+
+    @SuppressLint("MissingInflatedId")
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main6)
+
+        val threeDotMenu = findViewById<ImageView>(R.id.threeDotMenu)
+
+        threeDotMenu.setOnClickListener {
+            // Yahan jo karna ho wo likh sakte ho
+
+            // Example: Popup Menu dikhana
+            val popupMenu = PopupMenu(this, it)
+            popupMenu.menuInflater.inflate(R.menu.menu_options, popupMenu.menu)
+
+            popupMenu.setOnMenuItemClickListener { menuItem ->
+                when (menuItem.itemId) {
+                    R.id.option1 -> {
+                        Toast.makeText(this, "Text Translator", Toast.LENGTH_SHORT).show()
+                        true
+                    }
+                    R.id.option2 -> {
+                        Toast.makeText(this, "Image Resize", Toast.LENGTH_SHORT).show()
+                        true
+                    }
+                    R.id.option3 -> {
+                        Toast.makeText(this, "Maths Solver", Toast.LENGTH_SHORT).show()
+                        true
+                    }
+                    R.id.option4 -> {
+                        Toast.makeText(this, "Text Scanner", Toast.LENGTH_SHORT).show()
+                        true
+                    }
+                    else -> false
+                }
+            }
+            popupMenu.show()
+        }
+
+
+        // Profile icon click listener
+        val profileIcon: ImageView = findViewById(R.id.profileIconAnimation)
+        profileIcon.setOnClickListener {
+            val intent = Intent(this, ProfileActivity::class.java)
+            startActivity(intent)
+        }
+
+        initializeViews()
+        setupToolItems()
+        setupSearchFunctionality()
+        setupClickListeners()
+    }
+
+    private fun initializeViews() {
+        searchEditText = findViewById(R.id.searchEditText)
+        clearSearchButton = findViewById(R.id.clearSearchButton)
+        toolsContainer = findViewById(R.id.toolsContainer)
+        logoutButton = findViewById(R.id.logoutButton)
+
+        translatorCard = findViewById(R.id.translatorCard)
+        imageResizeCard = findViewById(R.id.ImageresizeCard)
+        mathsSolution = findViewById(R.id.MathsSolution)
+        scannerText = findViewById(R.id.ScannerText)
+    }
+
+    private fun setupToolItems() {
+        toolItems = listOf(
+            ToolItem(
+                card = translatorCard,
+                title = "Text Translator",
+                description = "Translate text between 100+ languages",
+                keywords = listOf("translate", "translation", "language", "text", "ai", "instant", "offline")
+            ),
+            ToolItem(
+                card = imageResizeCard,
+                title = "Image Resize",
+                description = "Resize and compress images quality",
+                keywords = listOf("image", "resize", "compress", "photo", "hd", "lossless", "quality")
+            ),
+            ToolItem(
+                card = mathsSolution,
+                title = "Math Solver",
+                description = "Solve complex math problems with AI",
+                keywords = listOf("math", "solver", "calculate", "equation", "ai", "instant", "accurate")
+            ),
+            ToolItem(
+                card = scannerText,
+                title = "Text Scanner",
+                description = "Extract text from images and documents",
+                keywords = listOf("scanner", "ocr", "text", "extract", "document", "camera", "fast", "accurate")
+            )
+        )
+    }
+
+    private fun setupSearchFunctionality() {
+        searchEditText.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                val query = s.toString().trim()
+                filterTools(query)
+
+                // Show/hide clear button
+                clearSearchButton.visibility = if (query.isNotEmpty()) View.VISIBLE else View.GONE
+            }
+
+            override fun afterTextChanged(s: Editable?) {}
+        })
+
+        clearSearchButton.setOnClickListener {
+            searchEditText.text.clear()
+            searchEditText.clearFocus()
+        }
+    }
+
+    private fun filterTools(query: String) {
+        if (query.isEmpty()) {
+            // Show all tools
+            toolItems.forEach { it.card.visibility = View.VISIBLE }
+            return
+        }
+
+        val lowercaseQuery = query.lowercase()
+
+        toolItems.forEach { toolItem ->
+            val isMatch = toolItem.title.lowercase().contains(lowercaseQuery) ||
+                    toolItem.description.lowercase().contains(lowercaseQuery) ||
+                    toolItem.keywords.any { it.lowercase().contains(lowercaseQuery) }
+
+            toolItem.card.visibility = if (isMatch) View.VISIBLE else View.GONE
+        }
+    }
+
+
+    private fun setupClickListeners() {
+        // Logout button click listener
+
+
+        // Tool cards click listeners
+        translatorCard.setOnClickListener {
+            val intent = Intent(this, MainActivity5::class.java)
+            startActivity(intent)
+        }
+
+        imageResizeCard.setOnClickListener {
+            val intent = Intent(this, MainActivity7::class.java)
+            startActivity(intent)
+        }
+
+        mathsSolution.setOnClickListener {
+            val intent = Intent(this, MainActivity8::class.java)
+            startActivity(intent)
+        }
+
+        scannerText.setOnClickListener {
+            val intent = Intent(this, MainActivity9::class.java)
+            startActivity(intent)
+        }
+    }
+}

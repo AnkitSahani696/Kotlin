@@ -1,0 +1,70 @@
+package com.example.inspiretool.com.example.inspiretool
+import com.google.mlkit.vision.text.Text
+
+object TextProcessingUtils {
+
+    fun processReceiptText(visionText: Text): String {
+        val lines = visionText.textBlocks.flatMap { it.lines }
+        val processedLines = mutableListOf<String>()
+
+        for (line in lines) {
+            val text = line.text.trim()
+            if (text.isNotEmpty()) {
+                // Look for price patterns
+                if (text.contains("$") || text.matches(Regex(".*\\d+\\.\\d{2}.*"))) {
+                    processedLines.add("💰 $text")
+                } else if (text.contains("total", ignoreCase = true)) {
+                    processedLines.add("🧾 $text")
+                } else {
+                    processedLines.add(text)
+                }
+            }
+        }
+
+        return processedLines.joinToString("\n")
+    }
+
+    fun processBusinessCardText(visionText: Text): String {
+        val lines = visionText.textBlocks.flatMap { it.lines }
+        val processedLines = mutableListOf<String>()
+
+        for (line in lines) {
+            val text = line.text.trim()
+            if (text.isNotEmpty()) {
+                // Look for email patterns
+                if (text.contains("@") && text.contains(".")) {
+                    processedLines.add("📧 $text")
+                } else if (text.matches(Regex(".*\\d{3}.*\\d{3}.*\\d{4}.*"))) {
+                    // Phone number pattern
+                    processedLines.add("📞 $text")
+                } else if (text.contains("www.") || text.contains("http")) {
+                    processedLines.add("🌐 $text")
+                } else {
+                    processedLines.add(text)
+                }
+            }
+        }
+
+        return processedLines.joinToString("\n")
+    }
+
+    fun processHandwrittenText(visionText: Text): String {
+        // For handwritten text, we'll focus on confidence and structure
+        val blocks = visionText.textBlocks
+        val processedBlocks = mutableListOf<String>()
+
+        for (block in blocks) {
+            val blockText = block.text.trim()
+            if (blockText.isNotEmpty()) {
+                processedBlocks.add(blockText)
+            }
+        }
+
+        return processedBlocks.joinToString("\n\n")
+    }
+
+    fun processDocumentText(visionText: Text): String {
+        // For general documents, maintain original structure
+        return visionText.text
+    }
+}

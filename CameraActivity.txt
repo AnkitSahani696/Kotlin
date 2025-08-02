@@ -1,0 +1,174 @@
+package com.example.inspiretool
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Matrix
+import android.os.Bundle
+import android.widget.ProgressBar
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.*
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import com.google.android.material.floatingactionbutton.FloatingActionButton
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import java.io.File
+import java.io.FileOutputStream
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+
+class CameraActivity : AppCompatActivity() {
+
+    private lateinit var previewView: PreviewView
+    private lateinit var btnCapture: FloatingActionButton
+    private lateinit var tvScanType: TextView
+    private lateinit var progressBar: ProgressBar
+
+    private var imageCapture: ImageCapture? = null
+    private lateinit var cameraExecutor: ExecutorService
+    private lateinit var scanType: String
+
+    companion object {
+        private const val REQUEST_CODE_PERMISSIONS = 10
+        private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_camera)
+
+        scanType = intent.getStringExtra("SCAN_TYPE") ?: "Document"
+
+        initViews()
+        setupUI()
+
+        if (allPermissionsGranted()) {
+            startCamera()
+        } else {
+            ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS)
+        }
+
+        cameraExecutor = Executors.newSingleThreadExecutor()
+    }
+
+    private fun initViews() {
+        previewView = findViewById(R.id.previewView)
+        btnCapture = findViewById(R.id.btnCapture)
+        tvScanType = findViewById(R.id.tvScanType)
+        progressBar = findViewById(R.id.progressBar)
+    }
+
+    private fun setupUI() {
+        tvScanType.text = scanType
+
+        btnCapture.setOnClickListener {
+            takePhoto()
+        }
+    }
+
+    private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
+        ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun startCamera() {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+
+        cameraProviderFuture.addListener({
+            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+
+            val preview = Preview.Builder().build().also {
+                it.setSurfaceProvider(previewView.surfaceProvider)
+            }
+
+            imageCapture = ImageCapture.Builder().build()
+
+            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+            try {
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageCapture)
+            } catch (exc: Exception) {
+                Toast.makeText(this, "Failed to start camera", Toast.LENGTH_SHORT).show()
+            }
+
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun takePhoto() {
+        val imageCapture = imageCapture ?: return
+
+        progressBar.visibility = ProgressBar.VISIBLE
+        btnCapture.isEnabled = false
+
+        val photoFile = File(cacheDir, "captured_image_${System.currentTimeMillis()}.jpg")
+
+        val outputFileOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+
+        imageCapture.takePicture(
+            outputFileOptions,
+            ContextCompat.getMainExecutor(this),
+            object : ImageCapture.OnImageSavedCallback {
+                override fun onError(exception: ImageCaptureException) {
+                    progressBar.visibility = ProgressBar.GONE
+                    btnCapture.isEnabled = true
+                    Toast.makeText(this@CameraActivity, "Photo capture failed: ${exception.message}", Toast.LENGTH_SHORT).show()
+                }
+
+                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                    processImage(photoFile)
+                }
+            }
+        )
+    }
+
+    private fun processImage(imageFile: File) {
+        val image = InputImage.fromFilePath(this, android.net.Uri.fromFile(imageFile))
+        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+
+        recognizer.process(image)
+            .addOnSuccessListener { visionText ->
+                progressBar.visibility = ProgressBar.GONE
+                btnCapture.isEnabled = true
+
+                val extractedText = visionText.text
+                navigateToResult(imageFile.absolutePath, extractedText)
+            }
+            .addOnFailureListener { e ->
+                progressBar.visibility = ProgressBar.GONE
+                btnCapture.isEnabled = true
+                Toast.makeText(this, "Text recognition failed: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+    }
+
+    private fun navigateToResult(imagePath: String, extractedText: String) {
+        val intent = Intent(this, ResultActivity::class.java)
+        intent.putExtra("IMAGE_PATH", imagePath)
+        intent.putExtra("EXTRACTED_TEXT", extractedText)
+        intent.putExtra("SCAN_TYPE", scanType)
+        startActivity(intent)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_CODE_PERMISSIONS) {
+            if (allPermissionsGranted()) {
+                startCamera()
+            } else {
+                Toast.makeText(this, getString(R.string.camera_permission_required), Toast.LENGTH_SHORT).show()
+                finish()
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        cameraExecutor.shutdown()
+    }
+}

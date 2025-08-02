@@ -1,0 +1,470 @@
+package com.example.inspiretool
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.graphics.Typeface
+import android.net.Uri
+import android.os.Bundle
+import android.provider.MediaStore
+import android.text.Spannable
+import android.text.SpannableString
+import android.text.style.StyleSpan
+import android.util.Log
+import android.view.View
+import android.widget.Button
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.*
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import com.google.ai.client.generativeai.GenerativeModel
+import com.google.android.material.floatingactionbutton.FloatingActionButton
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.IOException
+import java.nio.ByteBuffer
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+
+class MainActivity8 : AppCompatActivity() {
+
+    // Views
+    private lateinit var previewView: PreviewView
+    private lateinit var btnCapture: Button
+    private lateinit var btnGallery: Button
+    private lateinit var btnSolve: Button
+    private lateinit var etMathExpression: EditText
+    private lateinit var tvResult: TextView
+    private lateinit var progressBar: ProgressBar
+
+    // Camera containers
+    private lateinit var cameraIconContainer: LinearLayout
+    private lateinit var cameraPreviewContainer: FrameLayout
+    private lateinit var btnCloseCamera: FloatingActionButton
+
+    // Camera
+    private var imageCapture: ImageCapture? = null
+    private lateinit var cameraExecutor: ExecutorService
+    private var isCameraOpen = false
+
+    // AI
+    private lateinit var generativeModel: GenerativeModel
+    private val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+
+    // Permissions
+    private val CAMERA_PERMISSION_REQUEST_CODE = 100
+    private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
+
+    // Gallery launcher
+    private val galleryLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val imageUri = result.data?.data
+            imageUri?.let { uri ->
+                processImageFromUri(uri)
+            }
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main8)
+        findViewById<ImageView>(R.id.backButton).setOnClickListener {
+            finish() // goes back to previous Activity
+        }
+
+
+        // Initialize everything
+        initializeViews()
+        initializeGeminiModel()
+        setupClickListeners()
+        cameraExecutor = Executors.newSingleThreadExecutor()
+    }
+
+    private fun initializeViews() {
+        try {
+            // Find views safely
+            cameraIconContainer = findViewById(R.id.cameraIconContainer)
+            cameraPreviewContainer = findViewById(R.id.cameraPreviewContainer)
+            previewView = findViewById(R.id.previewView)
+            btnCapture = findViewById(R.id.btnCapture)
+            btnGallery = findViewById(R.id.btnGallery)
+            btnSolve = findViewById(R.id.btnSolve)
+            btnCloseCamera = findViewById(R.id.btnCloseCamera)
+            etMathExpression = findViewById(R.id.etMathExpression)
+            tvResult = findViewById(R.id.tvResult)
+            progressBar = findViewById(R.id.progressBar)
+
+            Log.d("MainActivity", "All views initialized successfully")
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error initializing views: ${e.message}")
+            Toast.makeText(this, "Error initializing app", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun initializeGeminiModel() {
+        val apiKey = "AIzaSyBqW2eWUDYmzOtqvL0b9G_1nxjJOBtmc-8"
+
+        try {
+            generativeModel = GenerativeModel(
+                modelName = "gemini-1.5-flash",
+                apiKey = apiKey
+            )
+            Log.d("GeminiAI", "Gemini model initialized successfully")
+        } catch (e: Exception) {
+            Log.e("GeminiAI", "Failed to initialize Gemini model", e)
+        }
+    }
+
+    private fun setupClickListeners() {
+        // Camera icon click
+        cameraIconContainer.setOnClickListener {
+            if (allPermissionsGranted()) {
+                openCamera()
+            } else {
+                ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, CAMERA_PERMISSION_REQUEST_CODE)
+            }
+        }
+
+        // Close camera button
+        btnCloseCamera.setOnClickListener {
+            closeCamera()
+        }
+
+        // Capture button
+        btnCapture.setOnClickListener {
+            takePhoto()
+        }
+
+        // Gallery button
+        btnGallery.setOnClickListener {
+            openGallery()
+        }
+
+        // Solve button
+        btnSolve.setOnClickListener {
+            val expression = etMathExpression.text.toString().trim()
+            if (expression.isNotEmpty()) {
+                solveMathWithAI(expression)
+            } else {
+                Toast.makeText(this, "Please enter a math expression", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun openCamera() {
+        try {
+            // Show camera preview, hide icon
+            cameraIconContainer.visibility = View.GONE
+            cameraPreviewContainer.visibility = View.VISIBLE
+            btnCapture.visibility = View.VISIBLE
+
+            // Start camera
+            startCamera()
+            isCameraOpen = true
+
+            Toast.makeText(this, "Camera opened! Position equation in frame", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error opening camera: ${e.message}")
+            Toast.makeText(this, "Error opening camera", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun closeCamera() {
+        try {
+            // Hide camera preview, show icon
+            cameraPreviewContainer.visibility = View.GONE
+            cameraIconContainer.visibility = View.VISIBLE
+            btnCapture.visibility = View.GONE
+
+            // Stop camera
+            val cameraProvider = ProcessCameraProvider.getInstance(this)
+            cameraProvider.addListener({
+                try {
+                    cameraProvider.get().unbindAll()
+                } catch (e: Exception) {
+                    Log.e("CameraX", "Error closing camera", e)
+                }
+            }, ContextCompat.getMainExecutor(this))
+
+            isCameraOpen = false
+            Toast.makeText(this, "Camera closed", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error closing camera: ${e.message}")
+        }
+    }
+
+    private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
+        ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun startCamera() {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+
+        cameraProviderFuture.addListener({
+            try {
+                val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+
+                val preview = Preview.Builder()
+                    .build()
+                    .also {
+                        it.setSurfaceProvider(previewView.surfaceProvider)
+                    }
+
+                imageCapture = ImageCapture.Builder()
+                    .setTargetRotation(previewView.display.rotation)
+                    .build()
+
+                val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(
+                    this, cameraSelector, preview, imageCapture
+                )
+
+                Log.d("CameraX", "Camera started successfully")
+            } catch (exc: Exception) {
+                Log.e("CameraX", "Use case binding failed", exc)
+                Toast.makeText(this, "Camera initialization failed", Toast.LENGTH_SHORT).show()
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun takePhoto() {
+        val imageCapture = imageCapture ?: return
+
+        showProgress(true)
+
+        imageCapture.takePicture(
+            ContextCompat.getMainExecutor(this),
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onError(exception: ImageCaptureException) {
+                    Log.e("CameraX", "Photo capture failed: ${exception.message}", exception)
+                    Toast.makeText(this@MainActivity8, "Photo capture failed", Toast.LENGTH_SHORT).show()
+                    showProgress(false)
+                }
+
+                override fun onCaptureSuccess(image: ImageProxy) {
+                    try {
+                        val bitmap = imageProxyToBitmap(image)
+                        processImageFromBitmap(bitmap)
+                        Toast.makeText(this@MainActivity8, "Photo captured successfully", Toast.LENGTH_SHORT).show()
+
+                        // Auto-close camera after successful capture
+                        closeCamera()
+                    } catch (e: Exception) {
+                        Log.e("CameraX", "Error processing captured image", e)
+                        Toast.makeText(this@MainActivity8, "Error processing image", Toast.LENGTH_SHORT).show()
+                        showProgress(false)
+                    } finally {
+                        image.close()
+                    }
+                }
+            }
+        )
+    }
+
+    private fun imageProxyToBitmap(image: ImageProxy): Bitmap {
+        val buffer: ByteBuffer = image.planes[0].buffer
+        val bytes = ByteArray(buffer.remaining())
+        buffer.get(bytes)
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+
+        val matrix = Matrix()
+        matrix.postRotate(image.imageInfo.rotationDegrees.toFloat())
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    }
+
+    private fun processImageFromBitmap(bitmap: Bitmap) {
+        val image = InputImage.fromBitmap(bitmap, 0)
+
+        showProgress(true)
+
+        textRecognizer.process(image)
+            .addOnSuccessListener { visionText ->
+                val recognizedText = visionText.text
+                Log.d("MLKit", "Recognized text: $recognizedText")
+
+                if (recognizedText.isNotEmpty()) {
+                    etMathExpression.setText(recognizedText)
+                    Toast.makeText(this, "Text recognized successfully", Toast.LENGTH_SHORT).show()
+                    solveMathWithAI(recognizedText)
+                } else {
+                    Toast.makeText(this, "No text found in image", Toast.LENGTH_SHORT).show()
+                    showProgress(false)
+                }
+            }
+            .addOnFailureListener { e ->
+                Log.e("MLKit", "Text recognition failed", e)
+                Toast.makeText(this, "Text recognition failed", Toast.LENGTH_SHORT).show()
+                showProgress(false)
+            }
+    }
+
+    private fun openGallery() {
+        val intent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
+        galleryLauncher.launch(intent)
+    }
+
+    private fun processImageFromUri(uri: Uri) {
+        try {
+            val bitmap = MediaStore.Images.Media.getBitmap(contentResolver, uri)
+            processImageFromBitmap(bitmap)
+        } catch (e: IOException) {
+            Log.e("ImageProcessing", "Error processing image", e)
+            Toast.makeText(this, "Error processing image", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun solveMathWithAI(expression: String) {
+        showProgress(true)
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val prompt = """
+                    You are an expert mathematics tutor. Solve this math problem step by step.
+                    
+                    Problem: $expression
+                    
+                    Please provide:
+                    1. FINAL ANSWER: [Show the result clearly]
+                    2. STEP-BY-STEP SOLUTION: [Show each calculation step]
+                    3. METHOD USED: [Explain the approach]
+                    
+                    If there are multiple problems, solve each one separately.
+                    If the text is unclear, explain what you can interpret and suggest corrections.
+                    
+                    Format your response clearly with proper mathematical notation.
+                    Do not use any markdown formatting like *, **, or # symbols.
+                    Use CAPITAL LETTERS for section headings instead.
+                """.trimIndent()
+
+                val response = generativeModel.generateContent(prompt)
+
+                withContext(Dispatchers.Main) {
+                    val result = response.text
+                    if (!result.isNullOrEmpty()) {
+                        val formattedResult = formatResultText(result)
+                        tvResult.text = formattedResult
+                        Log.d("GeminiAI", "Solution generated successfully")
+                        Toast.makeText(this@MainActivity8, "Problem solved!", Toast.LENGTH_SHORT).show()
+                    } else {
+                        tvResult.text = "Sorry, I couldn't solve this problem. Please try again with a clearer expression."
+                        Toast.makeText(this@MainActivity8, "No solution generated", Toast.LENGTH_SHORT).show()
+                    }
+                    showProgress(false)
+                }
+
+            } catch (e: Exception) {
+                Log.e("GeminiAI", "Error generating response", e)
+                withContext(Dispatchers.Main) {
+                    val errorMessage = when {
+                        e.message?.contains("API key") == true -> "Invalid API key. Please check your Gemini API key."
+                        e.message?.contains("quota") == true -> "API quota exceeded. Please try again later."
+                        e.message?.contains("blocked") == true -> "Request blocked. Please try a different expression."
+                        else -> "Network error. Please check your internet connection."
+                    }
+
+                    tvResult.text = "Error: $errorMessage"
+                    Toast.makeText(this@MainActivity8, errorMessage, Toast.LENGTH_SHORT).show()
+                    showProgress(false)
+                }
+            }
+        }
+    }
+
+    private fun formatResultText(text: String): SpannableString {
+        val spannableString = SpannableString(text)
+
+        val keywordsToHighlight = listOf(
+            "FINAL ANSWER:",
+            "STEP-BY-STEP SOLUTION:",
+            "METHOD USED:",
+            "ANSWER:",
+            "SOLUTION:",
+            "RESULT:",
+            "Step 1:",
+            "Step 2:",
+            "Step 3:",
+            "Step 4:",
+            "Step 5:",
+            "Therefore:",
+            "Hence:",
+            "Final Answer:",
+            "Answer:"
+        )
+
+        // Make keywords bold
+        keywordsToHighlight.forEach { keyword ->
+            var startIndex = text.indexOf(keyword, ignoreCase = true)
+            while (startIndex != -1) {
+                val endIndex = startIndex + keyword.length
+                spannableString.setSpan(
+                    StyleSpan(Typeface.BOLD),
+                    startIndex,
+                    endIndex,
+                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+                startIndex = text.indexOf(keyword, startIndex + 1, ignoreCase = true)
+            }
+        }
+
+        return spannableString
+    }
+
+    private fun showProgress(show: Boolean) {
+        progressBar.visibility = if (show) View.VISIBLE else View.GONE
+        btnSolve.isEnabled = !show
+        btnCapture.isEnabled = !show
+        btnGallery.isEnabled = !show
+        cameraIconContainer.isClickable = !show
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == CAMERA_PERMISSION_REQUEST_CODE) {
+            if (allPermissionsGranted()) {
+                openCamera()
+            } else {
+                Toast.makeText(this, "Camera permission is required to capture equations", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        cameraExecutor.shutdown()
+        textRecognizer.close()
+    }
+
+    override fun onBackPressed() {
+        if (isCameraOpen) {
+            closeCamera()
+        } else {
+            super.onBackPressed()
+        }
+    }
+}

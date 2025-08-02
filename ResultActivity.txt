@@ -1,0 +1,132 @@
+package com.example.inspiretool
+
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.graphics.BitmapFactory
+import android.os.Bundle
+import android.widget.ImageView
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.button.MaterialButton
+import java.io.File
+import java.io.FileWriter
+import java.io.IOException
+
+class ResultActivity : AppCompatActivity() {
+
+    private lateinit var imageView: ImageView
+    private lateinit var tvExtractedText: TextView
+    private lateinit var btnCopyText: MaterialButton
+    private lateinit var btnSaveText: MaterialButton
+    private lateinit var btnRetake: MaterialButton
+    private lateinit var btnBack: MaterialButton
+
+    private var extractedText: String = ""
+    private var scanType: String = ""
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_result)
+
+        initViews()
+        setupData()
+        setupClickListeners()
+    }
+
+    private fun initViews() {
+        imageView = findViewById(R.id.imageView)
+        tvExtractedText = findViewById(R.id.tvExtractedText)
+        btnCopyText = findViewById(R.id.btnCopyText)
+        btnSaveText = findViewById(R.id.btnSaveText)
+        btnRetake = findViewById(R.id.btnRetake)
+        btnBack = findViewById(R.id.btnBack)
+    }
+
+    private fun setupData() {
+        val imagePath = intent.getStringExtra("IMAGE_PATH")
+        extractedText = intent.getStringExtra("EXTRACTED_TEXT") ?: ""
+        scanType = intent.getStringExtra("SCAN_TYPE") ?: ""
+
+        // Display captured image
+        imagePath?.let {
+            val bitmap = BitmapFactory.decodeFile(it)
+            imageView.setImageBitmap(bitmap)
+        }
+
+        // Display extracted text
+        if (extractedText.isNotEmpty()) {
+            tvExtractedText.text = extractedText
+        } else {
+            tvExtractedText.text = getString(R.string.no_text_found)
+        }
+
+        // Set action bar title
+        supportActionBar?.title = "Result - $scanType"
+    }
+
+    private fun setupClickListeners() {
+        btnCopyText.setOnClickListener {
+            copyTextToClipboard()
+        }
+
+        btnSaveText.setOnClickListener {
+            saveTextToFile()
+        }
+
+        btnRetake.setOnClickListener {
+            retakePhoto()
+        }
+
+        btnBack.setOnClickListener {
+            navigateBack()
+        }
+    }
+
+    private fun copyTextToClipboard() {
+        if (extractedText.isNotEmpty()) {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = ClipData.newPlainText("Extracted Text", extractedText)
+            clipboard.setPrimaryClip(clip)
+            Toast.makeText(this, getString(R.string.text_copied), Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, getString(R.string.no_text_found), Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun saveTextToFile() {
+        if (extractedText.isNotEmpty()) {
+            try {
+                val fileName = "extracted_text_${System.currentTimeMillis()}.txt"
+                val file = File(filesDir, fileName)
+                val fileWriter = FileWriter(file)
+                fileWriter.write("Scan Type: $scanType\n")
+                fileWriter.write("Date: ${java.util.Date()}\n")
+                fileWriter.write("Extracted Text:\n\n$extractedText")
+                fileWriter.close()
+
+                Toast.makeText(this, getString(R.string.text_saved), Toast.LENGTH_SHORT).show()
+            } catch (e: IOException) {
+                Toast.makeText(this, "Failed to save text: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            Toast.makeText(this, getString(R.string.no_text_found), Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun retakePhoto() {
+        val intent = Intent(this, CameraActivity::class.java)
+        intent.putExtra("SCAN_TYPE", scanType)
+        startActivity(intent)
+        finish()
+    }
+
+    private fun navigateBack() {
+        val intent = Intent(this, MainActivity::class.java)
+        intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
+        startActivity(intent)
+        finish()
+    }
+}

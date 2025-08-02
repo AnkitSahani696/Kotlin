@@ -1,0 +1,141 @@
+package com.example.inspiretool
+
+import android.os.Bundle
+import android.widget.ArrayAdapter
+import android.widget.Button
+import android.widget.EditText
+import android.widget.ImageView
+import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.textfield.MaterialAutoCompleteTextView
+import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.Translation
+import com.google.mlkit.nl.translate.TranslatorOptions
+
+class MainActivity5 : AppCompatActivity() {
+
+    private lateinit var sourceText: EditText
+    private lateinit var translateBtn: Button
+    private lateinit var translatedText: TextView
+    private lateinit var sourceLanguageSpinner: MaterialAutoCompleteTextView
+    private lateinit var targetLanguageSpinner: MaterialAutoCompleteTextView
+    private lateinit var sourceLanguageFlag: ImageView
+    private lateinit var targetLanguageFlag: ImageView
+
+    // Supported languages with display names, codes and flag resources
+    private val supportedLanguages = listOf(
+        Language("English", TranslateLanguage.ENGLISH, R.drawable.ic_flag_english),
+        Language("Hindi", TranslateLanguage.HINDI, R.drawable.ic_flag_india),
+        Language("Spanish", TranslateLanguage.SPANISH, R.drawable.ic_flag_spain),
+        Language("French", TranslateLanguage.FRENCH, R.drawable.ic_flag_france),
+        Language("German", TranslateLanguage.GERMAN, R.drawable.ic_flag_germany),
+        Language("Italian", TranslateLanguage.ITALIAN, R.drawable.ic_flag_italy),
+        Language("Portuguese", TranslateLanguage.PORTUGUESE, R.drawable.ic_flag_portugal),
+        Language("Russian", TranslateLanguage.RUSSIAN, R.drawable.ic_flag_russia),
+        Language("Japanese", TranslateLanguage.JAPANESE, R.drawable.ic_flag_japan),
+        Language("Korean", TranslateLanguage.KOREAN, R.drawable.ic_flag_korea),
+        Language("Chinese", TranslateLanguage.CHINESE, R.drawable.ic_flag_china),
+        Language("Arabic", TranslateLanguage.ARABIC, R.drawable.ic_flag_saudi_arabia),
+        Language("Bengali", TranslateLanguage.BENGALI, R.drawable.ic_flag_bangladesh),
+        Language("Gujarati", TranslateLanguage.GUJARATI, R.drawable.ic_flag_india),
+        Language("Kannada", TranslateLanguage.KANNADA, R.drawable.ic_flag_india),
+        Language("Malayalam", TranslateLanguage.MALAY, R.drawable.ic_flag_india),
+        Language("Marathi", TranslateLanguage.MARATHI, R.drawable.ic_flag_india),
+        Language("Tamil", TranslateLanguage.TAMIL, R.drawable.ic_flag_india),
+        Language("Telugu", TranslateLanguage.TELUGU, R.drawable.ic_flag_india),
+        Language("Urdu", TranslateLanguage.URDU, R.drawable.ic_flag_pakistan)
+    )
+
+    data class Language(val displayName: String, val code: String, val flagResId: Int)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main5)
+        findViewById<ImageView>(R.id.backButton).setOnClickListener {
+            finish() // goes back to previous Activity
+        }
+
+
+        sourceText = findViewById(R.id.sourceText)
+        translateBtn = findViewById(R.id.translateBtn)
+        translatedText = findViewById(R.id.translatedText)
+        sourceLanguageSpinner = findViewById(R.id.sourceLanguageSpinner)
+        targetLanguageSpinner = findViewById(R.id.targetLanguageSpinner)
+        sourceLanguageFlag = findViewById(R.id.sourceLanguageFlag)
+        targetLanguageFlag = findViewById(R.id.targetLanguageFlag)
+
+        // Set up language spinners
+        val languageNames = supportedLanguages.map { it.displayName }
+        val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, languageNames)
+
+        sourceLanguageSpinner.setAdapter(adapter)
+        targetLanguageSpinner.setAdapter(adapter)
+
+        // Set default selections
+        sourceLanguageSpinner.setText("English", false)
+        targetLanguageSpinner.setText("Hindi", false)
+        sourceLanguageFlag.setImageResource(R.drawable.ic_flag_english)
+        targetLanguageFlag.setImageResource(R.drawable.ic_flag_india)
+
+        // Update flags when language changes
+        sourceLanguageSpinner.setOnItemClickListener { _, _, position, _ ->
+            val selectedLanguage = supportedLanguages[position]
+            sourceLanguageFlag.setImageResource(selectedLanguage.flagResId)
+        }
+
+        targetLanguageSpinner.setOnItemClickListener { _, _, position, _ ->
+            val selectedLanguage = supportedLanguages[position]
+            targetLanguageFlag.setImageResource(selectedLanguage.flagResId)
+        }
+
+        translateBtn.setOnClickListener {
+            val input = sourceText.text.toString().trim()
+            if (input.isNotEmpty()) {
+                val sourceLang = supportedLanguages.find { it.displayName == sourceLanguageSpinner.text.toString() }?.code
+                val targetLang = supportedLanguages.find { it.displayName == targetLanguageSpinner.text.toString() }?.code
+
+                if (sourceLang != null && targetLang != null) {
+                    if (sourceLang == targetLang) {
+                        translatedText.text = "Please select different languages"
+                        return@setOnClickListener
+                    }
+
+                    translatedText.text = "Translating..."
+                    translateText(input, sourceLang, targetLang)
+                } else {
+                    translatedText.text = "Please select valid languages"
+                }
+            } else {
+                translatedText.text = "Please enter text to translate"
+            }
+        }
+    }
+
+    private fun translateText(input: String, sourceLanguage: String, targetLanguage: String) {
+        val options = TranslatorOptions.Builder()
+            .setSourceLanguage(sourceLanguage)
+            .setTargetLanguage(targetLanguage)
+            .build()
+
+        val translator = Translation.getClient(options)
+
+        translator.downloadModelIfNeeded()
+            .addOnSuccessListener {
+                translator.translate(input)
+                    .addOnSuccessListener { translated ->
+                        translatedText.text = translated
+                    }
+                    .addOnFailureListener { e ->
+                        translatedText.text = "Translation failed: ${e.message}"
+                    }
+                    .addOnCompleteListener {
+                        translator.close()
+                    }
+            }
+            .addOnFailureListener { e ->
+                translatedText.text = "Model download failed: ${e.message}"
+                translator.close()
+            }
+    }
+}
+

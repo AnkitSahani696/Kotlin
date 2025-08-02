@@ -1,0 +1,25 @@
+package com.example.inspiretool
+
+import android.content.Intent
+import android.os.Bundle
+import android.widget.Button
+import androidx.appcompat.app.AppCompatActivity
+
+class DashboardActivity : AppCompatActivity() {
+
+    private lateinit var btnNext: Button
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_dashboard)
+
+        // Initialize NEXT button
+        btnNext = findViewById(R.id.btnNext)
+
+        // Go to MainActivity6 (Tools screen)
+        btnNext.setOnClickListener {
+            val intent = Intent(this, MainActivity6::class.java)
+            startActivity(intent)
+        }
+    }
+}

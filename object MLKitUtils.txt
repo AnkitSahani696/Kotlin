@@ -1,0 +1,182 @@
+package com.example.inspiretool
+import android.graphics.Bitmap
+import android.graphics.Matrix
+import com.google.mlkit.vision.common.InputImage
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import kotlin.math.max
+import kotlin.math.min
+
+object MLKitUtils {
+
+    /**
+     * Converts a Bitmap to InputImage for ML Kit processing
+     */
+    fun bitmapToInputImage(bitmap: Bitmap): InputImage {
+        return InputImage.fromBitmap(bitmap, 0)
+    }
+
+    /**
+     * Preprocesses image for TensorFlow Lite models
+     * Returns a ByteBuffer with normalized pixel values
+     */
+    fun preprocessForTensorFlow(
+        bitmap: Bitmap,
+        inputSize: Int = 224,
+        normalize: Boolean = true
+    ): ByteBuffer {
+        val resized = Bitmap.createScaledBitmap(bitmap, inputSize, inputSize, true)
+
+        val byteBuffer = ByteBuffer.allocateDirect(4 * inputSize * inputSize * 3)
+        byteBuffer.order(ByteOrder.nativeOrder())
+
+        val intValues = IntArray(inputSize * inputSize)
+        resized.getPixels(intValues, 0, resized.width, 0, 0, resized.width, resized.height)
+
+        var pixel = 0
+        for (i in 0 until inputSize) {
+            for (j in 0 until inputSize) {
+                val value = intValues[pixel++]
+
+                if (normalize) {
+                    // Normalize to [-1, 1] range (common for many models)
+                    byteBuffer.putFloat(((value shr 16 and 0xFF) - 127.5f) / 127.5f)
+                    byteBuffer.putFloat(((value shr 8 and 0xFF) - 127.5f) / 127.5f)
+                    byteBuffer.putFloat(((value and 0xFF) - 127.5f) / 127.5f)
+                } else {
+                    // Normalize to [0, 1] range
+                    byteBuffer.putFloat((value shr 16 and 0xFF) / 255.0f)
+                    byteBuffer.putFloat((value shr 8 and 0xFF) / 255.0f)
+                    byteBuffer.putFloat((value and 0xFF) / 255.0f)
+                }
+            }
+        }
+
+        return byteBuffer
+    }
+
+    /**
+     * Creates a square bitmap with padding for ML models that require square inputs
+     */
+    fun createSquareBitmapWithPadding(
+        bitmap: Bitmap,
+        targetSize: Int,
+        backgroundColor: Int = android.graphics.Color.BLACK
+    ): Bitmap {
+        val size = max(bitmap.width, bitmap.height)
+        val scale = targetSize.toFloat() / size
+
+        val scaledWidth = (bitmap.width * scale).toInt()
+        val scaledHeight = (bitmap.height * scale).toInt()
+
+        val scaledBitmap = Bitmap.createScaledBitmap(bitmap, scaledWidth, scaledHeight, true)
+
+        val result = Bitmap.createBitmap(targetSize, targetSize, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(result)
+
+        canvas.drawColor(backgroundColor)
+
+        val left = (targetSize - scaledWidth) / 2
+        val top = (targetSize - scaledHeight) / 2
+        canvas.drawBitmap(scaledBitmap, left.toFloat(), top.toFloat(), null)
+
+        return result
+    }
+
+    /**
+     * Rotates bitmap by the given angle
+     */
+    fun rotateBitmap(bitmap: Bitmap, angle: Float): Bitmap {
+        val matrix = Matrix()
+        matrix.postRotate(angle)
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    }
+
+    /**
+     * Crops bitmap to center square
+     */
+    fun cropToSquare(bitmap: Bitmap): Bitmap {
+        val size = min(bitmap.width, bitmap.height)
+        val x = (bitmap.width - size) / 2
+        val y = (bitmap.height - size) / 2
+        return Bitmap.createBitmap(bitmap, x, y, size, size)
+    }
+
+    /**
+     * Resizes bitmap maintaining aspect ratio and fitting within bounds
+     */
+    fun resizeKeepingAspectRatio(bitmap: Bitmap, maxWidth: Int, maxHeight: Int): Bitmap {
+        val aspectRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
+
+        val (newWidth, newHeight) = if (aspectRatio > 1) {
+            // Landscape
+            val width = min(maxWidth, bitmap.width)
+            val height = (width / aspectRatio).toInt()
+            if (height > maxHeight) {
+                val adjustedHeight = maxHeight
+                val adjustedWidth = (adjustedHeight * aspectRatio).toInt()
+                adjustedWidth to adjustedHeight
+            } else {
+                width to height
+            }
+        } else {
+            // Portrait or square
+            val height = min(maxHeight, bitmap.height)
+            val width = (height * aspectRatio).toInt()
+            if (width > maxWidth) {
+                val adjustedWidth = maxWidth
+                val adjustedHeight = (adjustedWidth / aspectRatio).toInt()
+                adjustedWidth to adjustedHeight
+            } else {
+                width to height
+            }
+        }
+
+        return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+    }
+
+    /**
+     * Converts bitmap to grayscale (useful for some ML models)
+     */
+    fun toGrayscale(bitmap: Bitmap): Bitmap {
+        val width = bitmap.width
+        val height = bitmap.height
+        val grayscaleBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+
+        val canvas = android.graphics.Canvas(grayscaleBitmap)
+        val paint = android.graphics.Paint()
+        val colorMatrix = android.graphics.ColorMatrix()
+        colorMatrix.setSaturation(0f)
+        val filter = android.graphics.ColorMatrixColorFilter(colorMatrix)
+        paint.colorFilter = filter
+        canvas.drawBitmap(bitmap, 0f, 0f, paint)
+
+        return grayscaleBitmap
+    }
+
+    /**
+     * Common ML Kit model input sizes
+     */
+    object ModelSizes {
+        const val MOBILENET_V1 = 224
+        const val MOBILENET_V2 = 224
+        const val INCEPTION_V3 = 299
+        const val INCEPTION_V4 = 299
+        const val RESNET_50 = 224
+        const val YOLO_V3 = 416
+        const val YOLO_V4 = 416
+        const val YOLO_V5 = 640
+        const val EFFICIENTNET_B0 = 224
+        const val EFFICIENTNET_B7 = 600
+    }
+
+    /**
+     * Quality settings for different use cases
+     */
+    object Quality {
+        const val HIGH_QUALITY = 95
+        const val MEDIUM_QUALITY = 85
+        const val LOW_QUALITY = 70
+        const val FAST_PROCESSING = 50
+    }
+}
