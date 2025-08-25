@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="160dp">
+
+    <!-- ✅ Background Animation -->
+    <com.airbnb.lottie.LottieAnimationView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        app:lottie_autoPlay="true"
+        app:lottie_loop="true"
+        app:lottie_rawRes="@raw/lemon" />
+
+    <!-- ✅ Foreground Content -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="16dp">
+
+        <!-- Circular Lottie Animation -->
+        <com.airbnb.lottie.LottieAnimationView
+            android:layout_width="80dp"
+            android:layout_height="80dp"
+            android:background="@drawable/circle_shape"
+            android:clipToOutline="true"
+            android:elevation="4dp"
+            app:lottie_autoPlay="true"
+            app:lottie_loop="true"
+            app:lottie_rawRes="@raw/menubar" />
+
+        <!-- Name -->
+        <TextView
+            android:id="@+id/nav_header_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:text="Ankit Sahani"
+            android:textColor="@android:color/white"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:gravity="center" />
+    </LinearLayout>
+</FrameLayout>
+
+
+
+
+////////////////////////////////////menu bar xmx///////////////////////////////////////
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/option1"
+        android:title="Text Translator"
+        android:icon="@drawable/ic_translate" />
+    <item
+        android:id="@+id/option2"
+        android:title="Image Resize"
+        android:icon="@drawable/ic_image" />
+    <item
+        android:id="@+id/option3"
+        android:title="Maths Solver"
+        android:icon="@drawable/ic_calculator" />
+    <item
+        android:id="@+id/option4"
+        android:title="Text Scanner"
+        android:icon="@drawable/ic_scanner" />
+
+    <item
+        android:id="@+id/option5"
+        android:title="Object Detect"
+        android:icon="@drawable/riyast" />
+
+</menu>
