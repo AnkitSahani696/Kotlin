@@ -1,0 +1,560 @@
+package com.example.inspiretools
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.os.Environment
+import android.provider.OpenableColumns
+import android.view.MenuItem
+import android.view.View
+import android.widget.*
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.Toolbar
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import java.io.File
+import java.io.FileOutputStream
+import java.io.InputStream
+import java.text.SimpleDateFormat
+import java.util.*
+import kotlin.collections.ArrayList
+
+class AppInfoActivity : AppCompatActivity() {
+
+    private lateinit var appVersionText: TextView
+    private lateinit var buildNumberText: TextView
+    private lateinit var developerText: TextView
+    private lateinit var uploadPdfButton: Button
+    private lateinit var pdfRecyclerView: RecyclerView
+    private lateinit var noPdfsText: TextView
+    private lateinit var totalPdfsText: TextView
+
+    private lateinit var pdfAdapter: PdfAdapter
+    private val pdfList = ArrayList<PdfDocument>()
+
+    companion object {
+        private const val PDF_PICK_REQUEST = 1001
+        private const val STORAGE_PERMISSION_REQUEST = 1002
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_app_info)
+        findViewById<ImageView>(R.id.backButton).setOnClickListener {
+            finish() // goes back to previous Activity
+        }
+
+        setupToolbar()
+        initializeViews()
+        setupAppInfo()
+        setupPdfUpload()
+        setupRecyclerView()
+        loadExistingPdfs()
+    }
+
+    private fun setupToolbar() {
+        val toolbar = findViewById<Toolbar>(R.id.toolbar)
+        setSupportActionBar(toolbar)
+
+        supportActionBar?.apply {
+            title = "App Info"
+            setDisplayHomeAsUpEnabled(true)
+            setDisplayShowHomeEnabled(true)
+        }
+    }
+
+    private fun initializeViews() {
+        appVersionText = findViewById(R.id.appVersionText)
+        buildNumberText = findViewById(R.id.buildNumberText)
+        developerText = findViewById(R.id.developerText)
+        uploadPdfButton = findViewById(R.id.uploadPdfButton)
+        pdfRecyclerView = findViewById(R.id.pdfRecyclerView)
+        noPdfsText = findViewById(R.id.noPdfsText)
+        totalPdfsText = findViewById(R.id.totalPdfsText)
+    }
+
+    private fun setupAppInfo() {
+        try {
+            val packageInfo = packageManager.getPackageInfo(packageName, 0)
+            appVersionText.text = "Version: ${packageInfo.versionName}"
+
+            val buildNumber = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                packageInfo.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                packageInfo.versionCode.toLong()
+            }
+            buildNumberText.text = "Build: $buildNumber"
+
+        } catch (e: PackageManager.NameNotFoundException) {
+            appVersionText.text = "Version: 1.0.0"
+            buildNumberText.text = "Build: 1"
+        }
+
+        developerText.text = "Developer: Your Company Name"
+    }
+
+    private fun setupPdfUpload() {
+        uploadPdfButton.setOnClickListener {
+            checkPermissionAndUpload()
+        }
+    }
+
+    private fun checkPermissionAndUpload() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // Android 13+ - no storage permission needed for document picker
+            openPdfPicker()
+        } else {
+            // Android 12 and below
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
+                == PackageManager.PERMISSION_GRANTED) {
+                openPdfPicker()
+            } else {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE),
+                    STORAGE_PERMISSION_REQUEST
+                )
+            }
+        }
+    }
+
+    private fun openPdfPicker() {
+        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+            type = "application/pdf"
+            addCategory(Intent.CATEGORY_OPENABLE)
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true) // Allow multiple PDF selection
+        }
+
+        try {
+            startActivityForResult(
+                Intent.createChooser(intent, "Select PDF Documents"),
+                PDF_PICK_REQUEST
+            )
+        } catch (e: Exception) {
+            showToast("No PDF reader app found")
+        }
+    }
+
+    private fun setupRecyclerView() {
+        pdfAdapter = PdfAdapter(pdfList) { pdf ->
+            showPdfOptionsDialog(pdf)
+        }
+
+        pdfRecyclerView.apply {
+            layoutManager = LinearLayoutManager(this@AppInfoActivity)
+            adapter = pdfAdapter
+        }
+    }
+
+    private fun loadExistingPdfs() {
+        // Load any previously uploaded PDFs from internal storage
+        updatePdfDisplay()
+    }
+
+    private fun updatePdfDisplay() {
+        totalPdfsText.text = "Total PDFs: ${pdfList.size}"
+
+        if (pdfList.isEmpty()) {
+            noPdfsText.visibility = View.VISIBLE
+            pdfRecyclerView.visibility = View.GONE
+        } else {
+            noPdfsText.visibility = View.GONE
+            pdfRecyclerView.visibility = View.VISIBLE
+        }
+
+        pdfAdapter.notifyDataSetChanged()
+    }
+
+    private fun processPdfUri(uri: Uri) {
+        try {
+            val fileName = getFileName(uri)
+            val fileSize = getFileSize(uri)
+
+            // Copy PDF to internal storage
+            val internalFile = copyPdfToInternalStorage(uri, fileName)
+
+            if (internalFile != null) {
+                val pdfDocument = PdfDocument(
+                    id = System.currentTimeMillis().toString(),
+                    name = fileName,
+                    size = fileSize,
+                    uploadDate = getCurrentDate(),
+                    filePath = internalFile.absolutePath,
+                    originalUri = uri.toString()
+                )
+
+                pdfList.add(pdfDocument)
+                updatePdfDisplay()
+                showToast("PDF uploaded successfully: $fileName")
+            } else {
+                showToast("Failed to upload PDF")
+            }
+
+        } catch (e: Exception) {
+            showToast("Error uploading PDF: ${e.message}")
+        }
+    }
+
+    private fun getFileName(uri: Uri): String {
+        var fileName = "unknown.pdf"
+
+        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIndex >= 0) {
+                    fileName = cursor.getString(nameIndex) ?: "unknown.pdf"
+                }
+            }
+        }
+
+        return fileName
+    }
+
+    private fun getFileSize(uri: Uri): String {
+        var size = 0L
+
+        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (sizeIndex >= 0) {
+                    size = cursor.getLong(sizeIndex)
+                }
+            }
+        }
+
+        return formatFileSize(size)
+    }
+
+    private fun formatFileSize(bytes: Long): String {
+        return when {
+            bytes < 1024 -> "$bytes B"
+            bytes < 1024 * 1024 -> "${bytes / 1024} KB"
+            bytes < 1024 * 1024 * 1024 -> "${bytes / (1024 * 1024)} MB"
+            else -> "${bytes / (1024 * 1024 * 1024)} GB"
+        }
+    }
+
+    private fun copyPdfToInternalStorage(uri: Uri, fileName: String): File? {
+        return try {
+            val inputStream: InputStream? = contentResolver.openInputStream(uri)
+            val internalDir = File(filesDir, "pdfs")
+            if (!internalDir.exists()) {
+                internalDir.mkdirs()
+            }
+
+            val file = File(internalDir, fileName)
+            val outputStream = FileOutputStream(file)
+
+            inputStream?.copyTo(outputStream)
+            inputStream?.close()
+            outputStream.close()
+
+            file
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun getCurrentDate(): String {
+        return SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date())
+    }
+
+    private fun showPdfOptionsDialog(pdf: PdfDocument) {
+        val options = arrayOf("Open PDF", "Share PDF", "View Details", "Delete PDF")
+
+        AlertDialog.Builder(this)
+            .setTitle(pdf.name)
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> openPdf(pdf)
+                    1 -> sharePdf(pdf)
+                    2 -> showPdfDetails(pdf)
+                    3 -> deletePdf(pdf)
+                }
+            }
+            .show()
+    }
+
+    private fun openPdf(pdf: PdfDocument) {
+        try {
+            val file = File(pdf.filePath)
+            if (file.exists()) {
+                // FIXED: Correct authority name
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    this,
+                    "com.example.inspiretools.fileprovider", // Fixed authority
+                    file
+                )
+
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "application/pdf")
+                    flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                            Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                            Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+
+                // Grant permissions to all PDF apps
+                val resInfoList = packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+                for (resolveInfo in resInfoList) {
+                    val packageName = resolveInfo.activityInfo.packageName
+                    grantUriPermission(
+                        packageName,
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    )
+                }
+
+                if (intent.resolveActivity(packageManager) != null) {
+                    startActivity(Intent.createChooser(intent, "Open PDF with"))
+                } else {
+                    // Fallback method
+                    openPdfFallback(pdf)
+                }
+            } else {
+                showToast("PDF file not found")
+            }
+        } catch (e: Exception) {
+            showToast("Error opening PDF: ${e.message}")
+            openPdfFallback(pdf) // Try fallback method
+        }
+    }
+
+    private fun openPdfFallback(pdf: PdfDocument) {
+        try {
+            // Copy to Downloads folder (publicly accessible)
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val tempFile = File(downloadsDir, "temp_${pdf.name}")
+
+            val originalFile = File(pdf.filePath)
+            originalFile.copyTo(tempFile, overwrite = true)
+
+            val uri = Uri.fromFile(tempFile)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/pdf")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+
+            if (intent.resolveActivity(packageManager) != null) {
+                startActivity(Intent.createChooser(intent, "Open PDF with"))
+            } else {
+                showPdfViewerDialog()
+            }
+
+        } catch (e: Exception) {
+            showPdfViewerDialog()
+        }
+    }
+
+    private fun showPdfViewerDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("PDF Viewer Required")
+            .setMessage("To view PDF files, please install a PDF reader app like Adobe Reader, WPS Office, or Google Drive.")
+            .setPositiveButton("Install PDF Reader") { _, _ ->
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        data = Uri.parse("market://details?id=com.adobe.reader")
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        data = Uri.parse("https://play.google.com/store/apps/details?id=com.adobe.reader")
+                    }
+                    startActivity(intent)
+                }
+            }
+            .setNeutralButton("Try WPS Office") { _, _ ->
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        data = Uri.parse("market://details?id=cn.wps.moffice_eng")
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        data = Uri.parse("https://play.google.com/store/apps/details?id=cn.wps.moffice_eng")
+                    }
+                    startActivity(intent)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    // sharePdf method भी update करें:
+    private fun sharePdf(pdf: PdfDocument) {
+        try {
+            val file = File(pdf.filePath)
+            if (file.exists()) {
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    this,
+                    "com.example.inspiretools.fileprovider", // Fixed authority
+                    file
+                )
+
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/pdf"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_SUBJECT, "Sharing: ${pdf.name}")
+                    flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                }
+
+                startActivity(Intent.createChooser(intent, "Share PDF"))
+            } else {
+                showToast("PDF file not found")
+            }
+        } catch (e: Exception) {
+            showToast("Error sharing PDF: ${e.message}")
+        }
+    }
+
+    private fun showPdfDetails(pdf: PdfDocument) {
+        val details = """
+            Name: ${pdf.name}
+            Size: ${pdf.size}
+            Upload Date: ${pdf.uploadDate}
+            Location: Internal Storage
+        """.trimIndent()
+
+        AlertDialog.Builder(this)
+            .setTitle("PDF Details")
+            .setMessage(details)
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
+    private fun deletePdf(pdf: PdfDocument) {
+        AlertDialog.Builder(this)
+            .setTitle("Delete PDF")
+            .setMessage("Are you sure you want to delete '${pdf.name}'?")
+            .setPositiveButton("Delete") { _, _ ->
+                try {
+                    val file = File(pdf.filePath)
+                    if (file.exists() && file.delete()) {
+                        pdfList.remove(pdf)
+                        updatePdfDisplay()
+                        showToast("PDF deleted successfully")
+                    } else {
+                        showToast("Failed to delete PDF file")
+                    }
+                } catch (e: Exception) {
+                    showToast("Error deleting PDF: ${e.message}")
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showToast(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+
+        when (requestCode) {
+            STORAGE_PERMISSION_REQUEST -> {
+                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    openPdfPicker()
+                } else {
+                    showToast("Storage permission required to upload PDFs")
+                }
+            }
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+
+        if (requestCode == PDF_PICK_REQUEST && resultCode == Activity.RESULT_OK) {
+            data?.let { intent ->
+                if (intent.clipData != null) {
+                    // Multiple files selected
+                    val clipData = intent.clipData!!
+                    for (i in 0 until clipData.itemCount) {
+                        val uri = clipData.getItemAt(i).uri
+                        processPdfUri(uri)
+                    }
+                } else if (intent.data != null) {
+                    // Single file selected
+                    processPdfUri(intent.data!!)
+                }
+            }
+        }
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            android.R.id.home -> {
+                onBackPressed()
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
+        }
+    }
+
+    @SuppressLint("GestureBackNavigation")
+    override fun onBackPressed() {
+        super.onBackPressed()
+        overridePendingTransition(R.anim.slide_in_left, R.anim.slide_out_right)
+    }
+}
+// Data class for PDF documents
+data class PdfDocument(
+    val id: String,
+    val name: String,
+    val size: String,
+    val uploadDate: String,
+    val filePath: String,
+    val originalUri: String
+)
+
+// RecyclerView Adapter for PDFs
+class PdfAdapter(
+    private val pdfs: List<PdfDocument>,
+    private val onPdfClick: (PdfDocument) -> Unit
+) : RecyclerView.Adapter<PdfAdapter.PdfViewHolder>() {
+
+    class PdfViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        val pdfIcon: ImageView = itemView.findViewById(R.id.pdfIcon)
+        val pdfName: TextView = itemView.findViewById(R.id.pdfName)
+        val pdfSize: TextView = itemView.findViewById(R.id.pdfSize)
+        val pdfDate: TextView = itemView.findViewById(R.id.pdfDate)
+        val moreOptions: ImageView = itemView.findViewById(R.id.moreOptions)
+    }
+
+    override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): PdfViewHolder {
+        val view = android.view.LayoutInflater.from(parent.context)
+            .inflate(R.layout.item_pdf_document, parent, false)
+        return PdfViewHolder(view)
+    }
+
+    override fun onBindViewHolder(holder: PdfViewHolder, position: Int) {
+        val pdf = pdfs[position]
+
+        holder.pdfName.text = pdf.name
+        holder.pdfSize.text = pdf.size
+        holder.pdfDate.text = pdf.uploadDate
+
+        holder.itemView.setOnClickListener {
+            onPdfClick(pdf)
+        }
+
+        holder.moreOptions.setOnClickListener {
+            onPdfClick(pdf)
+        }
+    }
+
+    override fun getItemCount() = pdfs.size
+}

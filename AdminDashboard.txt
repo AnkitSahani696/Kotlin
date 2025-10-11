@@ -1,0 +1,65 @@
+package com.example.inspiretools
+
+import android.annotation.SuppressLint
+import android.os.Bundle
+import android.widget.*
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+
+class AdminDashboardActivity : AppCompatActivity() {
+
+    private lateinit var recyclerView: RecyclerView
+    private lateinit var dbHelper: DatabaseHelper
+    private lateinit var adapter: UserAdapter
+
+    @SuppressLint("MissingInflatedId")
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_admin_dashboard)
+        findViewById<ImageView>(R.id.backButton).setOnClickListener {
+            finish() // goes back to previous Activity
+        }
+
+
+
+        recyclerView = findViewById(R.id.recyclerViewUsers)
+        recyclerView.layoutManager = LinearLayoutManager(this)
+
+        dbHelper = DatabaseHelper(this)
+        loadUsers()
+    }
+
+    private fun loadUsers() {
+        val userList = dbHelper.getAllUsers()
+        adapter = UserAdapter(userList,
+            onEdit = { user -> showEditDialog(user) },
+            onDelete = { user ->
+                dbHelper.deleteUser(user.id)
+                loadUsers()
+            }
+        )
+        recyclerView.adapter = adapter
+    }
+
+    private fun showEditDialog(user: User) {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_edit_user, null)
+        val etName = dialogView.findViewById<EditText>(R.id.etName)
+        val etEmail = dialogView.findViewById<EditText>(R.id.etEmail)
+        val etPassword = dialogView.findViewById<EditText>(R.id.etPassword)
+
+        etName.setText(user.name)
+        etEmail.setText(user.email)
+        etPassword.setText(user.password)
+
+        AlertDialog.Builder(this)
+            .setTitle("Edit User")
+            .setView(dialogView)
+            .setPositiveButton("Update") { _, _ ->
+                dbHelper.updateUser(user.id, etName.text.toString(), etEmail.text.toString(), etPassword.text.toString())
+                loadUsers()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }

@@ -1,0 +1,392 @@
+package com.example.inspiretools
+
+import android.annotation.SuppressLint
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import android.content.Context
+import android.os.Bundle
+import android.view.MenuItem
+import android.view.View
+import android.widget.*
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.Toolbar
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import java.text.SimpleDateFormat
+import java.util.*
+import kotlin.collections.ArrayList
+
+
+class CalendarActivity : AppCompatActivity() {
+
+    private lateinit var calendarView: CalendarView
+    private lateinit var eventsRecyclerView: RecyclerView
+    private lateinit var addEventButton: Button
+    private lateinit var selectedDateText: TextView
+    private lateinit var noEventsText: TextView
+
+    private lateinit var eventsAdapter: EventsAdapter
+    private val eventsList = ArrayList<CalendarEvent>()
+    private var selectedDate = ""
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_calendar)
+        findViewById<ImageView>(R.id.backButton).setOnClickListener {
+            finish() // goes back to previous Activity
+        }
+
+        setupToolbar()
+        initializeViews()
+        setupCalendarView()
+        setupRecyclerView()
+        loadSampleEvents()
+    }
+
+    private fun setupToolbar() {
+        val toolbar = findViewById<Toolbar>(R.id.toolbar)
+        setSupportActionBar(toolbar)
+
+        supportActionBar?.apply {
+            title = "Calendar"
+            setDisplayHomeAsUpEnabled(true)
+            setDisplayShowHomeEnabled(true)
+        }
+    }
+
+    private fun initializeViews() {
+        calendarView = findViewById(R.id.calendarView)
+        eventsRecyclerView = findViewById(R.id.eventsRecyclerView)
+        addEventButton = findViewById(R.id.addEventButton)
+        selectedDateText = findViewById(R.id.selectedDateText)
+        noEventsText = findViewById(R.id.noEventsText)
+
+        // Set current date as selected
+        val currentDate = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date())
+        selectedDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        selectedDateText.text = "Events for $currentDate"
+    }
+
+    private fun setupCalendarView() {
+        calendarView.setOnDateChangeListener { _, year, month, dayOfMonth ->
+            val calendar = Calendar.getInstance()
+            calendar.set(year, month, dayOfMonth)
+
+            selectedDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(calendar.time)
+            val displayDate =
+                SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(calendar.time)
+            selectedDateText.text = "Events for $displayDate"
+
+            filterEventsByDate(selectedDate)
+        }
+
+        addEventButton.setOnClickListener {
+            showAddEventDialog()
+        }
+    }
+
+    private fun setupRecyclerView() {
+        eventsAdapter = EventsAdapter(eventsList) { event ->
+            showEventOptionsDialog(event)
+        }
+
+        eventsRecyclerView.apply {
+            layoutManager = LinearLayoutManager(this@CalendarActivity)
+            adapter = eventsAdapter
+        }
+    }
+
+    private fun loadSampleEvents() {
+        // Add some sample events
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val tomorrow = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(
+            Date(System.currentTimeMillis() + 24 * 60 * 60 * 1000)
+        )
+
+        eventsList.addAll(
+            listOf(
+                CalendarEvent(
+                    "1",
+                    "Team Meeting",
+                    "Discuss project progress",
+                    today,
+                    "10:00 AM",
+                    "Meeting"
+                ),
+                CalendarEvent(
+                    "2",
+                    "Doctor Appointment",
+                    "Regular checkup",
+                    today,
+                    "2:30 PM",
+                    "Health"
+                ),
+                CalendarEvent(
+                    "3",
+                    "Gym Session",
+                    "Workout routine",
+                    tomorrow,
+                    "6:00 AM",
+                    "Fitness"
+                ),
+                CalendarEvent(
+                    "4",
+                    "Lunch with Client",
+                    "Business discussion",
+                    tomorrow,
+                    "1:00 PM",
+                    "Business"
+                )
+            )
+        )
+
+        filterEventsByDate(selectedDate)
+    }
+
+    private fun filterEventsByDate(date: String) {
+        val filteredEvents = eventsList.filter { it.date == date }
+        eventsAdapter.updateEvents(filteredEvents)
+
+        if (filteredEvents.isEmpty()) {
+            noEventsText.visibility = View.VISIBLE
+            eventsRecyclerView.visibility = View.GONE
+        } else {
+            noEventsText.visibility = View.GONE
+            eventsRecyclerView.visibility = View.VISIBLE
+        }
+    }
+
+    private fun showAddEventDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_add_event, null)
+        val titleInput = dialogView.findViewById<EditText>(R.id.eventTitleInput)
+        val descriptionInput = dialogView.findViewById<EditText>(R.id.eventDescriptionInput)
+        val dateButton = dialogView.findViewById<Button>(R.id.selectDateButton)
+        val timeButton = dialogView.findViewById<Button>(R.id.selectTimeButton)
+        val categorySpinner = dialogView.findViewById<Spinner>(R.id.categorySpinner)
+
+        var selectedEventDate = selectedDate
+        var selectedTime = "9:00 AM"
+
+        // Setup category spinner
+        val categories = arrayOf("Meeting", "Personal", "Health", "Fitness", "Business", "Other")
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, categories)
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        categorySpinner.adapter = adapter
+
+        // Set initial values
+        dateButton.text = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(
+            SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(selectedDate)!!
+        )
+        timeButton.text = selectedTime
+
+        dateButton.setOnClickListener {
+            showDatePicker { date ->
+                selectedEventDate = date
+                dateButton.text = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(
+                    SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(date)!!
+                )
+            }
+        }
+
+        timeButton.setOnClickListener {
+            showTimePicker { time ->
+                selectedTime = time
+                timeButton.text = time
+            }
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Add New Event")
+            .setView(dialogView)
+            .setPositiveButton("Add") { _, _ ->
+                val title = titleInput.text.toString().trim()
+                val description = descriptionInput.text.toString().trim()
+                val category = categorySpinner.selectedItem.toString()
+
+                if (title.isNotEmpty()) {
+                    val newEvent = CalendarEvent(
+                        id = System.currentTimeMillis().toString(),
+                        title = title,
+                        description = description,
+                        date = selectedEventDate,
+                        time = selectedTime,
+                        category = category
+                    )
+
+                    eventsList.add(newEvent)
+                    filterEventsByDate(this.selectedDate)
+                    showToast("Event added successfully")
+                } else {
+                    showToast("Please enter event title")
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showDatePicker(callback: (String) -> Unit) {
+        val calendar = Calendar.getInstance()
+        DatePickerDialog(
+            this,
+            { _, year, month, dayOfMonth ->
+                val selectedCalendar = Calendar.getInstance()
+                selectedCalendar.set(year, month, dayOfMonth)
+                val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                callback(dateFormat.format(selectedCalendar.time))
+            },
+            calendar.get(Calendar.YEAR),
+            calendar.get(Calendar.MONTH),
+            calendar.get(Calendar.DAY_OF_MONTH)
+        ).show()
+    }
+
+    private fun showTimePicker(callback: (String) -> Unit) {
+        val calendar = Calendar.getInstance()
+        TimePickerDialog(this, { _, hourOfDay, minute ->
+            val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+            val timeCalendar = Calendar.getInstance()
+            timeCalendar.set(Calendar.HOUR_OF_DAY, hourOfDay)
+            timeCalendar.set(Calendar.MINUTE, minute)
+            callback(timeFormat.format(timeCalendar.time))
+        }, calendar.get(Calendar.HOUR_OF_DAY), calendar.get(Calendar.MINUTE), false).show()
+    }
+
+    private fun showEventOptionsDialog(event: CalendarEvent) {
+        val options = arrayOf("View Details", "Edit Event", "Delete Event")
+
+        AlertDialog.Builder(this)
+            .setTitle(event.title)
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> showEventDetails(event)
+                    1 -> editEvent(event)
+                    2 -> deleteEvent(event)
+                }
+            }
+            .show()
+    }
+
+    private fun showEventDetails(event: CalendarEvent) {
+        val details = """
+            Title: ${event.title}
+            Description: ${event.description}
+            Date: ${
+            SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(
+                SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(event.date)!!
+            )
+        }
+            Time: ${event.time}
+            Category: ${event.category}
+        """.trimIndent()
+
+        AlertDialog.Builder(this)
+            .setTitle("Event Details")
+            .setMessage(details)
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
+    private fun editEvent(event: CalendarEvent) {
+        // Similar to add event dialog but with pre-filled values
+        showToast("Edit functionality - coming soon!")
+    }
+
+    private fun deleteEvent(event: CalendarEvent) {
+        AlertDialog.Builder(this)
+            .setTitle("Delete Event")
+            .setMessage("Are you sure you want to delete '${event.title}'?")
+            .setPositiveButton("Delete") { _, _ ->
+                eventsList.remove(event)
+                filterEventsByDate(selectedDate)
+                showToast("Event deleted")
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showToast(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
+    @SuppressLint("GestureBackNavigation")
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            android.R.id.home -> {
+                onBackPressed()
+                true
+            }
+
+            else -> super.onOptionsItemSelected(item)
+        }
+    }
+
+    @SuppressLint("GestureBackNavigation")
+    override fun onBackPressed() {
+        super.onBackPressed()   // Default back button behavior (activity finish ya previous activity)
+        overridePendingTransition(R.anim.slide_in_left, R.anim.slide_out_right) // Custom animation
+    }
+}
+
+// Data class for Calendar Event
+data class CalendarEvent(
+    val id: String,
+    val title: String,
+    val description: String,
+    val date: String, // yyyy-MM-dd format
+    val time: String,
+    val category: String
+)
+
+// RecyclerView Adapter for Events
+class EventsAdapter(
+    private var events: List<CalendarEvent>,
+    private val onEventClick: (CalendarEvent) -> Unit
+) : RecyclerView.Adapter<EventsAdapter.EventViewHolder>() {
+
+    class EventViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        val titleText: TextView = itemView.findViewById(R.id.eventTitle)
+        val timeText: TextView = itemView.findViewById(R.id.eventTime)
+        val categoryText: TextView = itemView.findViewById(R.id.eventCategory)
+        val descriptionText: TextView = itemView.findViewById(R.id.eventDescription)
+    }
+
+    override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): EventViewHolder {
+        val view = android.view.LayoutInflater.from(parent.context)
+            .inflate(R.layout.item_calendar_event, parent, false)
+        return EventViewHolder(view)
+    }
+
+    override fun onBindViewHolder(holder: EventViewHolder, position: Int) {
+        val event = events[position]
+
+        holder.titleText.text = event.title
+        holder.timeText.text = event.time
+        holder.categoryText.text = event.category
+        holder.descriptionText.text = event.description
+
+        // Set category color
+        val categoryColor = when (event.category) {
+            "Meeting" -> android.R.color.holo_blue_light
+            "Personal" -> android.R.color.holo_green_light
+            "Health" -> android.R.color.holo_red_light
+            "Fitness" -> android.R.color.holo_orange_light
+            "Business" -> android.R.color.holo_purple
+            else -> android.R.color.darker_gray
+        }
+        holder.categoryText.setTextColor(
+            androidx.core.content.ContextCompat.getColor(holder.itemView.context, categoryColor)
+        )
+
+        holder.itemView.setOnClickListener {
+            onEventClick(event)
+        }
+    }
+
+    override fun getItemCount() = events.size
+
+    fun updateEvents(newEvents: List<CalendarEvent>) {
+        events = newEvents
+        notifyDataSetChanged()
+    }
+}

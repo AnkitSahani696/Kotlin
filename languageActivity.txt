@@ -1,0 +1,100 @@
+package com.example.inspiretools
+
+import android.content.Context
+import android.content.SharedPreferences
+import android.os.Bundle
+import android.view.MenuItem
+import android.widget.ArrayAdapter
+import android.widget.Button
+import android.widget.ImageView
+import android.widget.Spinner
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+
+class LanguageActivity : AppCompatActivity() {
+
+    private lateinit var languageSpinner: Spinner
+    private lateinit var saveButton: Button
+    private lateinit var sharedPreferences: SharedPreferences
+
+    private val languages = arrayOf(
+        "English",
+        "हिंदी (Hindi)",
+        "ગુજરાતી (Gujarati)",
+        "मराठी (Marathi)",
+        "বাংলা (Bengali)",
+        "தமிழ் (Tamil)",
+        "తెలుగు (Telugu)",
+        "ಕನ್ನಡ (Kannada)",
+        "മലയാളം (Malayalam)",
+        "ਪੰਜਾਬੀ (Punjabi)"
+    )
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_language)
+        findViewById<ImageView>(R.id.backButton).setOnClickListener {
+            finish() // goes back to previous Activity
+        }
+
+        initViews()
+        setupToolbar()
+        loadSavedLanguage()
+        setupClickListeners()
+    }
+
+    private fun initViews() {
+        languageSpinner = findViewById(R.id.languageSpinner)
+        saveButton = findViewById(R.id.saveButton)
+        sharedPreferences = getSharedPreferences("AppSettings", Context.MODE_PRIVATE)
+    }
+
+    private fun setupToolbar() {
+        supportActionBar?.apply {
+            setDisplayHomeAsUpEnabled(true)
+            title = "Language Settings"
+        }
+    }
+
+    private fun loadSavedLanguage() {
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, languages)
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        languageSpinner.adapter = adapter
+
+        // Load saved language
+        val savedLanguage = sharedPreferences.getString("selected_language", "English")
+        val position = languages.indexOf(savedLanguage)
+        if (position >= 0) {
+            languageSpinner.setSelection(position)
+        }
+    }
+
+    private fun setupClickListeners() {
+        saveButton.setOnClickListener {
+            val selectedLanguage = languageSpinner.selectedItem.toString()
+            saveLanguagePreference(selectedLanguage)
+        }
+    }
+
+    private fun saveLanguagePreference(language: String) {
+        val editor = sharedPreferences.edit()
+        editor.putString("selected_language", language)
+        editor.apply()
+
+        Toast.makeText(this, "Language saved: $language", Toast.LENGTH_SHORT).show()
+
+        // Optionally restart the app or update UI
+        // recreate()
+        finish()
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            android.R.id.home -> {
+                onBackPressed()
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
+        }
+    }
+}
